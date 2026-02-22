@@ -87,6 +87,8 @@ export type CliBackendConfig = {
   imageMode?: "repeat" | "list";
   /** Serialize runs for this CLI. */
   serialize?: boolean;
+  /** Enable real-time streaming of CLI output to the channel (default: false). */
+  streaming?: boolean;
   /** Runtime reliability tuning for this backend's process lifecycle. */
   reliability?: {
     /** No-output watchdog tuning (fresh vs resumed runs). */

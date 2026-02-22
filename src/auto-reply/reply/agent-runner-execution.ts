@@ -212,6 +212,34 @@ export async function runAgentTurnWithFallback(params: {
                   ownerNumbers: params.followupRun.run.ownerNumbers,
                   cliSessionId,
                   images: params.opts?.images,
+                  onPartialReply: async (payload) => {
+                    const textForTyping = await handlePartialForTyping(payload);
+                    if (textForTyping !== undefined) {
+                      await params.opts?.onPartialReply?.({
+                        text: textForTyping,
+                        mediaUrls: payload.mediaUrls,
+                      });
+                    }
+                  },
+                  onBlockReply: params.opts?.onBlockReply
+                    ? createBlockReplyDeliveryHandler({
+                        onBlockReply: params.opts.onBlockReply,
+                        currentMessageId:
+                          params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid,
+                        normalizeStreamingText,
+                        applyReplyToMode: params.applyReplyToMode,
+                        typingSignals: params.typingSignals,
+                        blockStreamingEnabled: params.blockStreamingEnabled,
+                        blockReplyPipeline,
+                        directlySentBlockKeys,
+                      })
+                    : undefined,
+                  onBlockReplyFlush:
+                    params.blockStreamingEnabled && blockReplyPipeline
+                      ? async () => {
+                          await blockReplyPipeline.flush({ force: true });
+                        }
+                      : undefined,
                 });
 
                 // CLI backends don't emit streaming assistant events, so we need to

@@ -24,6 +24,7 @@ import {
   resolveSystemPromptUsage,
   writeCliImages,
 } from "./cli-runner/helpers.js";
+import { createStreamJsonParser } from "./cli-runner/stream-json-parser.js";
 import { resolveOpenClawDocsPath } from "./docs-path.js";
 import { FailoverError, resolveFailoverStatus } from "./failover-error.js";
 import { classifyFailoverReason, isFailoverErrorMessage } from "./pi-embedded-helpers.js";
@@ -50,6 +51,9 @@ export async function runCliAgent(params: {
   ownerNumbers?: string[];
   cliSessionId?: string;
   images?: ImageContent[];
+  onPartialReply?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
+  onBlockReply?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
+  onBlockReplyFlush?: () => void | Promise<void>;
 }): Promise<EmbeddedPiRunResult> {
   const started = Date.now();
   const workspaceResolution = resolveRunWorkspaceDir({
@@ -239,23 +243,69 @@ export async function runCliAgent(params: {
         cliSessionId: useResume ? cliSessionIdToSend : undefined,
       });
 
+      // --- Streaming path: use stream-json parser with real-time callbacks ---
+      const isStreaming = Boolean(backend.streaming);
+      const spawnArgs = [...args];
+      if (isStreaming) {
+        const fmtIdx = spawnArgs.indexOf("--output-format");
+        if (fmtIdx >= 0 && fmtIdx + 1 < spawnArgs.length && spawnArgs[fmtIdx + 1] === "json") {
+          spawnArgs[fmtIdx + 1] = "stream-json";
+        }
+      }
+
+      let streamParser: ReturnType<typeof createStreamJsonParser> | undefined;
+      let stderrBuffer = "";
+      const pendingDeliveries: Promise<void>[] = [];
+
+      if (isStreaming) {
+        streamParser = createStreamJsonParser({
+          onText: (text) => {
+            if (params.onBlockReply) {
+              const p = Promise.resolve(params.onBlockReply({ text })).catch(() => {});
+              pendingDeliveries.push(p);
+            }
+            if (params.onPartialReply) {
+              const p = Promise.resolve(params.onPartialReply({ text })).catch(() => {});
+              pendingDeliveries.push(p);
+            }
+          },
+        });
+      }
+
       const managedRun = await supervisor.spawn({
         sessionId: params.sessionId,
         backendId: backendResolved.id,
         scopeKey,
         replaceExistingScope: Boolean(useResume && scopeKey),
         mode: "child",
-        argv: [backend.command, ...args],
+        argv: [backend.command, ...spawnArgs],
         timeoutMs: params.timeoutMs,
         noOutputTimeoutMs,
         cwd: workspaceDir,
         env,
         input: stdinPayload,
+        ...(isStreaming
+          ? {
+              captureOutput: false,
+              onStdout: (chunk: string) => {
+                streamParser!.feed(chunk);
+              },
+              onStderr: (chunk: string) => {
+                stderrBuffer += chunk;
+              },
+            }
+          : {}),
       });
       const result = await managedRun.wait();
 
-      const stdout = result.stdout.trim();
-      const stderr = result.stderr.trim();
+      if (streamParser) {
+        streamParser.flush();
+        await Promise.all(pendingDeliveries);
+        await params.onBlockReplyFlush?.();
+      }
+
+      const stdout = isStreaming ? streamParser!.getCollectedText().trim() : result.stdout.trim();
+      const stderr = isStreaming ? stderrBuffer.trim() : result.stderr.trim();
       if (logOutputText) {
         if (stdout) {
           log.info(`cli stdout:\n${stdout}`);
@@ -306,6 +356,16 @@ export async function runCliAgent(params: {
         });
       }
 
+      // --- Streaming: result from parser state ---
+      if (isStreaming && streamParser) {
+        return {
+          text: stdout,
+          sessionId: streamParser.getSessionId(),
+          usage: streamParser.getUsage(),
+        };
+      }
+
+      // --- Non-streaming: parse captured output ---
       const outputMode = useResume ? (backend.resumeOutput ?? backend.output) : backend.output;
 
       if (outputMode === "text") {
