@@ -84,7 +84,7 @@ export async function runCliAgent(params: {
 
   const extraSystemPrompt = [
     params.extraSystemPrompt?.trim(),
-    "Tools are disabled in this session. Do not call tools.",
+    "When using tools, only include your final conclusion in your response. Do not narrate intermediate steps, tool calls, or raw tool outputs to the user.",
   ]
     .filter(Boolean)
     .join("\n");

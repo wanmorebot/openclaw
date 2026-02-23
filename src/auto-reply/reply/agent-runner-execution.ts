@@ -194,6 +194,10 @@ export async function runAgentTurnWithFallback(params: {
             const cliSessionId = getCliSessionId(params.getActiveSessionEntry(), provider);
             return (async () => {
               let lifecycleTerminalEmitted = false;
+              // Keep typing indicator alive during long CLI runs (refresh every 30s).
+              const cliTypingRefresh = setInterval(() => {
+                void params.typingSignals.signalToolStart();
+              }, 30_000);
               try {
                 const result = await runCliAgent({
                   sessionId: params.followupRun.run.sessionId,
@@ -280,6 +284,7 @@ export async function runAgentTurnWithFallback(params: {
                 lifecycleTerminalEmitted = true;
                 throw err;
               } finally {
+                clearInterval(cliTypingRefresh);
                 // Defensive backstop: never let a CLI run complete without a terminal
                 // lifecycle event, otherwise downstream consumers can hang.
                 if (!lifecycleTerminalEmitted) {

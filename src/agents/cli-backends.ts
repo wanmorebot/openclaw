@@ -57,12 +57,12 @@ const DEFAULT_CLAUDE_BACKEND: CliBackendConfig = {
   clearEnv: ["ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_OLD", "CLAUDECODE", "CLAUDE_CODE"],
   reliability: {
     watchdog: {
-      fresh: { ...CLI_FRESH_WATCHDOG_DEFAULTS },
-      resume: { ...CLI_RESUME_WATCHDOG_DEFAULTS },
+      fresh: { noOutputTimeoutMs: 2_147_483_647 },
+      resume: { noOutputTimeoutMs: 2_147_483_647 },
     },
   },
-  serialize: true,
-  streaming: true,
+  serialize: false,
+  streaming: false,
 };
 
 const DEFAULT_CODEX_BACKEND: CliBackendConfig = {
